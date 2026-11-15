@@ -2,210 +2,503 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field Shift Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
 <style>
-  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
-  #side { width: 340px; padding: 14px; overflow: auto; background: #f5f7f5; }
-  #map { flex: 1; }
-  label { font-size: 13px; font-weight: bold; }
-  input, select, button { width: 100%; margin: 4px 0 10px; padding: 8px; box-sizing: border-box; }
-  button { background: #1a9850; color: white; border: none; font-size: 15px; cursor: pointer; }
-  #info { margin: 10px 0; font-weight: bold; }
-  .hint { font-size: 13px; color: #444; }
-  canvas { margin-bottom: 14px; }
+  :root {
+    --ink: #0f172a; --muted: #64748b; --line: #e5e7eb; --soft: #f8fafc;
+    --accent: #16a34a; --accent2: #22c55e; --radius: 20px;
+    --shadow: 0 10px 30px rgba(15,23,42,.10), 0 30px 60px -20px rgba(15,23,42,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: #fff; color: var(--ink);
+         font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+
+  .app { display: flex; gap: 22px; height: 100vh; padding: 22px; }
+  #side { width: 400px; flex: none; overflow-y: auto; background: #fff; border: 1px solid var(--line);
+          border-radius: var(--radius); box-shadow: 0 8px 24px rgba(15,23,42,.06); padding: 24px;
+          animation: slideLeft .7s cubic-bezier(.2,.8,.2,1) both; }
+  #side::-webkit-scrollbar { width: 8px; }
+  #side::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 8px; }
+  #mapwrap { position: relative; flex: 1; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+             border: 1px solid var(--line); animation: slideRight .8s cubic-bezier(.2,.8,.2,1) both; }
+  #map { position: absolute; inset: 0; }
+
+  .brand { display: flex; align-items: center; gap: 12px; animation: fadeUp .6s .1s both; }
+  .logo { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+          background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-size: 22px;
+          box-shadow: 0 8px 18px rgba(34,197,94,.35); }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.3px; }
+  .hint { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 14px 0 18px; animation: fadeUp .6s .2s both; }
+
+  .panel { background: var(--soft); border: 1px solid var(--line); border-radius: 16px; padding: 16px; animation: fadeUp .6s .3s both; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+  input, select { width: 100%; padding: 11px 12px; font: inherit; font-size: 14px; color: var(--ink); background: #fff;
+                  border: 1px solid var(--line); border-radius: 12px; outline: none; transition: border-color .2s, box-shadow .2s; }
+  input:hover, select:hover { border-color: #cbd5e1; }
+  input:focus, select:focus { border-color: var(--accent2); box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+  .field { margin-bottom: 12px; } .field:last-child { margin-bottom: 0; }
+
+  .presets { display: flex; gap: 8px; margin: -4px 0 12px; }
+  .presets button { flex: 1; padding: 6px 0; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted);
+                    background: #fff; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; transition: all .2s; }
+  .presets button:hover { color: var(--accent); border-color: var(--accent2); transform: translateY(-1px); }
+
+  button#goBtn { position: relative; width: 100%; margin-top: 16px; padding: 14px; border: 0; cursor: pointer; font: inherit;
+                 font-size: 15px; font-weight: 600; color: #fff; border-radius: 14px;
+                 background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 10px 22px rgba(34,197,94,.35);
+                 transition: transform .2s, box-shadow .2s, filter .2s; animation: fadeUp .6s .4s both; }
+  button#goBtn:hover { transform: translateY(-2px); box-shadow: 0 14px 28px rgba(34,197,94,.42); filter: brightness(1.03); }
+  button#goBtn:active { transform: scale(.98); }
+  button#goBtn:disabled { cursor: progress; filter: saturate(.8); }
+  .spinner { display: none; width: 18px; height: 18px; margin-right: 8px; vertical-align: -3px;
+             border: 3px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+  button#goBtn.loading .spinner { display: inline-block; }
+
+  a.planner { display: inline-block; margin-top: 14px; font-size: 14px; font-weight: 500; color: var(--accent);
+              text-decoration: none; animation: fadeUp .6s .5s both; transition: transform .2s; }
+  a.planner:hover { transform: translateX(4px); text-decoration: underline; }
+
+  .result { display: none; margin-top: 18px; padding: 16px; border-radius: 16px;
+            background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #bbf7d0; }
+  .result.show { display: block; animation: pop .5s cubic-bezier(.2,1.2,.4,1) both; }
+  .result.error { background: #fef2f2; border-color: #fecaca; }
+  .result .title { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .result .value { font-size: 32px; font-weight: 700; letter-spacing: -.5px; margin: 2px 0 10px; }
+  .result.error .value { font-size: 15px; font-weight: 600; color: #b91c1c; letter-spacing: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: #fff; border: 1px solid var(--line); color: #334155; }
+  .insight { display: none; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; background: #fff;
+             border: 1px solid var(--line); border-radius: 12px; font-size: 13px; font-weight: 600; }
+  .insight.show { display: flex; animation: fadeUp .5s .2s both; }
+  .insight small { display: block; font-weight: 500; color: var(--muted); font-size: 11px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .dot.good { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.2); }
+  .dot.mid  { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.2); }
+  .dot.bad  { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,.2); }
+  .note { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); font-style: italic; }
+
+  #skeleton { display: none; margin-top: 18px; } #skeleton.show { display: block; }
+  .sk { height: 14px; border-radius: 8px; margin-bottom: 10px;
+        background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
+  .sk.big { height: 120px; border-radius: 14px; }
+
+  .card { display: none; margin-top: 16px; padding: 16px; background: #fff; border: 1px solid var(--line);
+          border-radius: 18px; box-shadow: 0 6px 18px rgba(15,23,42,.05); }
+  .card.show { display: block; animation: fadeUp .6s both; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .card-head b { font-size: 14px; } .card-head span { font-size: 11px; color: var(--muted); }
+  .kpis { display: grid; gap: 8px; margin-bottom: 14px; grid-template-columns: repeat(2, 1fr); }
+  .kpis.k3 { grid-template-columns: repeat(3, 1fr); }
+  .kpi { padding: 10px 12px; border-radius: 12px; background: var(--soft); border: 1px solid var(--line); }
+  .kpi small { display: block; font-size: 10.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .kpi b { display: block; font-size: 18px; margin-top: 2px; letter-spacing: -.3px; }
+  .kpi b.up { color: #16a34a; } .kpi b.down { color: #d97706; }
+  .chartbox { position: relative; height: 240px; }
+
+  #mapLoader { position: absolute; inset: 0; z-index: 800; display: grid; place-items: center; background: rgba(255,255,255,.55);
+               backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .3s; }
+  #mapLoader.show { opacity: 1; }
+  .big-spin { width: 54px; height: 54px; border: 5px solid #d1fae5; border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; }
+
+  #legend { position: absolute; left: 18px; bottom: 28px; z-index: 850; width: 250px; padding: 12px 14px; display: none;
+            background: rgba(255,255,255,.92); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 14px;
+            box-shadow: 0 8px 24px rgba(15,23,42,.18); }
+  #legend.show { display: block; animation: fadeUp .5s both; }
+  #legend .lt { font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+  #legend .bar { height: 10px; border-radius: 6px; }
+  #legend .lab { display: flex; justify-content: space-between; margin-top: 5px; font-size: 11px; font-weight: 600; color: #334155; }
+  #legend .sub { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); }
+
+  #mapTag { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 850; display: none;
+            padding: 8px 16px; background: rgba(255,255,255,.94); border: 1px solid var(--line); border-radius: 999px;
+            font-size: 12.5px; font-weight: 600; box-shadow: 0 8px 20px rgba(15,23,42,.15); white-space: nowrap; }
+  #mapTag.show { display: block; animation: fadeUp .5s both; }
+
+  .leaflet-bar { border: none !important; box-shadow: 0 6px 18px rgba(15,23,42,.18) !important; border-radius: 12px !important; overflow: hidden; }
+  .leaflet-container { font-family: inherit; }
+  .pin { position: relative; width: 18px; height: 18px; }
+  .pin .dot2 { position: absolute; inset: 0; border-radius: 50%; background: var(--accent); border: 3px solid #fff;
+               box-shadow: 0 4px 12px rgba(0,0,0,.35); animation: drop .55s cubic-bezier(.2,1.4,.4,1) both; }
+  .pin .ring { position: absolute; inset: -8px; border-radius: 50%; background: rgba(34,197,94,.4); animation: pulse 1.8s ease-out infinite; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes slideLeft { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+  @keyframes slideRight { from { opacity: 0; transform: translateX(30px) scale(.98); } to { opacity: 1; transform: none; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @keyframes pulse { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.8); opacity: 0; } }
+  @keyframes drop { from { transform: translateY(-26px) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  @media (max-width: 860px) { .app { flex-direction: column; height: auto; } #side { width: 100%; } #mapwrap { height: 70vh; flex: none; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 
-<div id="side">
-  <h3>Field Shift Viewer</h3>
-  <p class="hint">Click on the map to pick a location, or type the latitude and longitude.</p>
+<div class="app">
+  <aside id="side">
+    <div class="brand"><div class="logo">🌾</div><h1>Field Shift Viewer</h1></div>
+    <p class="hint">Click on the map to pick a field, or type the latitude and longitude. Then choose a layer and a date range.</p>
 
-  <label>Latitude</label>
-  <input id="lat" value="19.09">
-  <label>Longitude</label>
-  <input id="lon" value="74.74">
-  <label>Start date</label>
-  <input id="start" type="date" value="2026-09-01">
-  <label>End date</label>
-  <input id="end" type="date" value="2026-10-31">
-  <label>What do you want to see?</label>
-  <select id="layer">
-    <optgroup label="Vegetation and heat (30 m)">
-      <option value="ndvi">NDVI (crop health) - 30 m</option>
-      <option value="lst">Surface temperature (°C) - 30 m</option>
-    </optgroup>
-    <optgroup label="Highest resolution - Sentinel-2 (10 m)">
-      <option value="ndvi10">NDVI crop health - 10 m</option>
-      <option value="ndmi">Vegetation water content (NDMI) - 10 m</option>
-      <option value="productivity">Land productivity change vs past years - 10 m</option>
-    </optgroup>
-    <optgroup label="Soil moisture (SMAP L4, ~9 km)">
-      <option value="sm_surface">Surface soil moisture (0-5 cm)</option>
-      <option value="sm_rootzone">Root-zone soil moisture (0-100 cm)</option>
-      <option value="sm_profile">Profile soil moisture (full depth)</option>
-      <option value="sm_rootzone_pctl">Root-zone moisture percentile (drought stress)</option>
-    </optgroup>
-    <optgroup label="Rainfall">
-      <option value="rain">Rainfall (mm) - 5 km</option>
-      <option value="rain_reliability">Rainfall reliability (%) - 5 km</option>
-      <option value="storm_freq">Extreme-storm frequency (days) - 5 km</option>
-    </optgroup>
-    <optgroup label="Soil risk and water (30 m)">
-      <option value="erosion">Erosion risk (relative index) - 30 m</option>
-      <option value="water_input">Water input to soil (mm) - 30 m</option>
-    </optgroup>
-    <optgroup label="Radiation and water availability">
-      <option value="radiation">Solar radiation (MJ/m²/day) - 30 m</option>
-      <option value="water_stress">Water availability ET/PET - 500 m</option>
-    </optgroup>
-    <optgroup label="Soil nutrients and productivity">
-      <option value="soil_n">Soil nitrogen (%) 0-30 cm - 250 m</option>
-      <option value="gpp">Land productivity GPP (g C/m²) - 500 m</option>
-    </optgroup>
-  </select>
+    <div class="panel">
+      <div class="row field">
+        <div><label>Latitude</label><input id="lat" value="19.09"></div>
+        <div><label>Longitude</label><input id="lon" value="74.74"></div>
+      </div>
+      <div class="row field">
+        <div><label>Start date</label><input id="start" type="date" value="2026-09-01"></div>
+        <div><label>End date</label><input id="end" type="date" value="2026-10-31"></div>
+      </div>
+      <div class="presets">
+        <button type="button" onclick="preset(30)">Last 30 days</button>
+        <button type="button" onclick="preset(60)">Last 60 days</button>
+        <button type="button" onclick="preset(90)">Last 90 days</button>
+      </div>
+      <div class="field">
+        <label>What do you want to see?</label>
+        <select id="layer">
+          <optgroup label="Vegetation and heat (30 m)">
+            <option value="ndvi">NDVI (crop health) - 30 m</option>
+            <option value="lst">Surface temperature (°C) - 30 m</option>
+          </optgroup>
+          <optgroup label="Soil moisture (SMAP L4, ~9 km)">
+            <option value="sm_surface">Surface soil moisture (0-5 cm)</option>
+            <option value="sm_rootzone">Root-zone soil moisture (0-100 cm)</option>
+            <option value="sm_profile">Profile soil moisture (full depth)</option>
+            <option value="sm_rootzone_pctl">Root-zone moisture percentile (drought stress)</option>
+          </optgroup>
+          <optgroup label="Rainfall">
+            <option value="rain">Rainfall (mm) - 5 km</option>
+          </optgroup>
+        </select>
+      </div>
+    </div>
 
-  <button onclick="run()">Show data</button>
-  <div id="info"></div>
-  <canvas id="chart"></canvas>
-  <canvas id="chart2"></canvas>
+    <button id="goBtn" onclick="run()"><span class="spinner"></span><span id="btnText">Show data</span></button>
+
+    <!-- KEEP YOUR OWN LINK: replace the # in href with your planner URL -->
+    <a class="planner" href="#">Open the crop rotation planner →</a>
+
+    <div id="result" class="result">
+      <div class="title" id="rTitle"></div>
+      <div class="value" id="rValue"></div>
+      <div class="chips" id="rChips"></div>
+      <div class="insight" id="rInsight"><span class="dot" id="rDot"></span>
+        <div><span id="rInsightText"></span><small>Quick read (rule of thumb, not a scientific verdict)</small></div></div>
+      <div class="note" id="rNote"></div>
+    </div>
+
+    <div id="skeleton"><div class="sk" style="width:55%"></div><div class="sk" style="width:85%"></div><div class="sk big"></div></div>
+
+    <div class="card" id="cardWeather">
+      <div class="card-head"><b>Daily weather</b><span>NASA POWER · regional model, ~50 km</span></div>
+      <div class="kpis">
+        <div class="kpi"><small>Avg temp</small><b id="kAvg">-</b></div>
+        <div class="kpi"><small>Max temp</small><b id="kMax">-</b></div>
+        <div class="kpi"><small>Total rain</small><b id="kRain">-</b></div>
+        <div class="kpi"><small>Rainy days (≥1 mm)</small><b id="kDays">-</b></div>
+      </div>
+      <div class="chartbox"><canvas id="chart"></canvas></div>
+    </div>
+
+    <div class="card" id="cardSoil">
+      <div class="card-head"><b>Soil moisture trend</b><span>SMAP L4 · ~9 km, daily mean</span></div>
+      <div class="kpis k3">
+        <div class="kpi"><small>Surface avg</small><b id="sAvgS">-</b></div>
+        <div class="kpi"><small>Root-zone avg</small><b id="sAvgR">-</b></div>
+        <div class="kpi"><small>Root-zone trend</small><b id="sTrend">-</b></div>
+      </div>
+      <div class="chartbox"><canvas id="chart2"></canvas></div>
+    </div>
+  </aside>
+
+  <main id="mapwrap">
+    <div id="map"></div>
+    <div id="mapTag"></div>
+    <div id="legend">
+      <div class="lt" id="lgTitle"></div>
+      <div class="bar" id="lgBar"></div>
+      <div class="lab"><span id="lgMin"></span><span id="lgMax"></span></div>
+      <div class="sub"><span id="lgLo"></span><span id="lgHi"></span></div>
+    </div>
+    <div id="mapLoader"><div class="big-spin"></div></div>
+  </main>
 </div>
 
-<div id="map"></div>
-
 <script>
+// If you changed the backend URL earlier, keep your own value here:
 const API = "http://127.0.0.1:8000";
 
 const LABELS = {
-  ndvi: "Mean NDVI",
-  lst:  "Mean surface temperature (°C)",
-  rain: "Total rainfall (mm)",
-  sm_surface:  "Mean surface soil moisture (m³/m³)",
-  sm_rootzone: "Mean root-zone soil moisture (m³/m³)",
-  sm_profile:  "Mean profile soil moisture (m³/m³)",
-  sm_rootzone_pctl: "Mean root-zone moisture percentile (%)",
-  rain_reliability: "Mean rainfall reliability (%)",
-  storm_freq: "Mean extreme-storm days",
-  erosion: "Mean erosion risk index",
-  water_input: "Mean water input to soil (mm)",
-  ndvi10: "Mean NDVI (10 m)",
-  ndmi: "Mean NDMI (vegetation water content)",
-  productivity: "Mean productivity change (%)",
-  radiation: "Mean solar radiation (MJ/m²/day)",
-  water_stress: "Mean ET/PET (water availability, 0-1)",
-  soil_n: "Mean soil nitrogen 0-30 cm (%)",
-  gpp: "Mean GPP (g C/m²)"
+  ndvi: "Mean NDVI", lst: "Mean surface temperature (°C)", rain: "Total rainfall (mm)",
+  sm_surface: "Mean surface soil moisture (m³/m³)", sm_rootzone: "Mean root-zone soil moisture (m³/m³)",
+  sm_profile: "Mean profile soil moisture (m³/m³)", sm_rootzone_pctl: "Mean root-zone moisture percentile (%)"
 };
+const SMC = ["#a50026", "#fdae61", "#ffffbf", "#abd9e9", "#2c7bb6"];
+const LEGENDS = {
+  ndvi: { title: "NDVI", min: 0, max: 0.8, colors: ["#d73027", "#fee08b", "#a6d96a", "#1a9850"], lo: "Bare / stressed", hi: "Dense / healthy" },
+  lst:  { title: "Surface temperature (°C)", min: 15, max: 45, colors: ["#313695", "#ffffbf", "#a50026"], lo: "Cool", hi: "Hot" },
+  rain: { title: "Rainfall (mm)", min: 0, max: 200, colors: ["#ffffff", "#74add1", "#08306b"], lo: "Dry", hi: "Wet" },
+  sm_surface:  { title: "Surface soil moisture (m³/m³)", min: 0.05, max: 0.5, colors: SMC, lo: "Dry", hi: "Wet" },
+  sm_rootzone: { title: "Root-zone soil moisture (m³/m³)", min: 0.05, max: 0.5, colors: SMC, lo: "Dry", hi: "Wet" },
+  sm_profile:  { title: "Profile soil moisture (m³/m³)", min: 0.05, max: 0.5, colors: SMC, lo: "Dry", hi: "Wet" },
+  sm_rootzone_pctl: { title: "Root-zone moisture percentile (%)", min: 0, max: 100, colors: SMC, lo: "Drier than usual", hi: "Wetter than usual" }
+};
+const NOTES = {
+  ndvi: "Median of cloud-free Landsat 8/9 images in the selected range.",
+  lst:  "Land skin temperature measured by Landsat at its late-morning pass. It reads hotter than the air temperature shown in the weather chart.",
+  rain: "CHIRPS rainfall summed over the selected range (~5 km grid).",
+  sm_surface: "SMAP L4 combines satellite data with a land model on a ~9 km grid. Good for regional trends, not for a single field.",
+  sm_rootzone: "SMAP L4 combines satellite data with a land model on a ~9 km grid. Good for regional trends, not for a single field.",
+  sm_profile: "SMAP L4 combines satellite data with a land model on a ~9 km grid. Good for regional trends, not for a single field.",
+  sm_rootzone_pctl: "Percentile compared with the long-term record for the same time of year. Low values suggest drought-like stress."
+};
+const RULES = {   // [upper limit, text, level]
+  ndvi: [[0.2, "Bare soil or stressed crop", "bad"], [0.5, "Moderate vegetation or early crop growth", "mid"], [9, "Healthy, dense vegetation", "good"]],
+  lst:  [[30, "Cool surface", "good"], [40, "Warm surface", "mid"], [99, "Very hot surface, possible heat stress", "bad"]],
+  rain: [[20, "Very little rain in this period", "bad"], [100, "Moderate rainfall", "mid"], [99999, "Heavy rainfall", "good"]],
+  sm_surface:  [[0.15, "Dry topsoil", "bad"], [0.30, "Moderate topsoil moisture", "mid"], [9, "Wet topsoil", "good"]],
+  sm_rootzone: [[0.15, "Dry root zone", "bad"], [0.30, "Moderate root-zone moisture", "mid"], [9, "Wet root zone", "good"]],
+  sm_profile:  [[0.15, "Dry soil profile", "bad"], [0.30, "Moderate soil moisture", "mid"], [9, "Wet soil profile", "good"]],
+  sm_rootzone_pctl: [[20, "Much drier than normal: drought-like stress", "bad"], [40, "Below normal", "mid"], [70, "Near normal", "good"], [101, "Wetter than normal", "good"]]
+};
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtP = d => `${d.slice(6)} ${MONTHS[+d.slice(4, 6) - 1]}`;      // 20260901
+const fmtI = d => `${d.slice(8)} ${MONTHS[+d.slice(5, 7) - 1]}`;      // 2026-09-01
+const $ = (id) => document.getElementById(id);
 
-const map = L.map("map").setView([19.09, 74.74], 9);
+// ---------- chart look ----------
+Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+Chart.defaults.color = "#64748b";
+Chart.defaults.interaction = { mode: "index", intersect: false };
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.legend.labels.boxWidth = 8;
+Chart.defaults.plugins.tooltip.backgroundColor = "#0f172a";
+Chart.defaults.plugins.tooltip.cornerRadius = 10;
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.boxPadding = 4;
 
-// Satellite basemap + place names on top
+function grad(chart, c1, c2) {
+  const a = chart.chartArea;
+  if (!a) return c1;
+  const g = chart.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+  g.addColorStop(0, c1); g.addColorStop(1, c2);
+  return g;
+}
+
+// ---------- map ----------
+const map = L.map("map", { zoomControl: true }).setView([19.09, 74.74], 9);
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
             { attribution: "Tiles © Esri", maxZoom: 18 }).addTo(map);
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
             { maxZoom: 18, zIndex: 5 }).addTo(map);
 
+const pinIcon = L.divIcon({ className: "", html: '<div class="pin"><div class="ring"></div><div class="dot2"></div></div>',
+                            iconSize: [18, 18], iconAnchor: [9, 9] });
 let marker = null, geeLayer = null, chart = null, chart2 = null;
-const $ = (id) => document.getElementById(id);
 
+function setMarker(lat, lon) {
+  if (marker) map.removeLayer(marker);
+  marker = L.marker([lat, lon], { icon: pinIcon }).addTo(map);
+}
 map.on("click", (e) => {
   $("lat").value = e.latlng.lat.toFixed(4);
   $("lon").value = e.latlng.lng.toFixed(4);
-  if (marker) map.removeLayer(marker);
-  marker = L.marker(e.latlng).addTo(map);
+  setMarker(e.latlng.lat, e.latlng.lng);
 });
 
-function resText(m) {
-  return m >= 1000 ? "~" + Math.round(m / 1000) + " km" : m + " m";
+function boundsFor(lat, lon, rKm) {
+  const dLat = rKm / 111, dLon = rKm / (111 * Math.cos(lat * Math.PI / 180));
+  return [[lat - dLat, lon - dLon], [lat + dLat, lon + dLon]];
 }
 
-// fine layers: zoom in close, coarse layers: wider view
-function zoomFor(m) {
-  if (m >= 1000) return 9;
-  if (m >= 250) return 11;
-  return 13;
+// ---------- UI helpers ----------
+const iso = (d) => d.toISOString().slice(0, 10);
+function preset(days) {
+  const end = new Date(); end.setDate(end.getDate() - 5);       // data lags a few days
+  const st = new Date(end); st.setDate(st.getDate() - days);
+  $("end").value = iso(end); $("start").value = iso(st);
 }
+function resText(m) { return m >= 1000 ? "~" + Math.round(m / 1000) + " km" : m + " m"; }
+function countUp(el, to, dec) {
+  const t0 = performance.now(), dur = 900;
+  (function f(t) {
+    const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = (to * e).toFixed(dec);
+    if (k < 1) requestAnimationFrame(f);
+  })(t0);
+}
+function setBusy(on) {
+  $("goBtn").disabled = on;
+  $("goBtn").classList.toggle("loading", on);
+  $("btnText").textContent = on ? "Loading..." : "Show data";
+  $("mapLoader").classList.toggle("show", on);
+  $("skeleton").classList.toggle("show", on);
+}
+function showLegend(layer) {
+  const L_ = LEGENDS[layer];
+  $("lgTitle").textContent = L_.title;
+  $("lgBar").style.background = `linear-gradient(to right, ${L_.colors.join(",")})`;
+  $("lgMin").textContent = L_.min; $("lgMax").textContent = L_.max;
+  $("lgLo").textContent = L_.lo;  $("lgHi").textContent = L_.hi;
+  const lg = $("legend"); lg.classList.remove("show"); void lg.offsetWidth; lg.classList.add("show");
+}
+function showTag(layer) {
+  const t = $("mapTag");
+  t.textContent = `${LEGENDS[layer].title}  ·  ${fmtI($("start").value)} – ${fmtI($("end").value)} ${$("end").value.slice(0, 4)}`;
+  t.classList.remove("show"); void t.offsetWidth; t.classList.add("show");
+}
+function showResult(layer, title, value, chips, isError) {
+  const r = $("result");
+  r.classList.remove("show", "error"); void r.offsetWidth;
+  if (isError) r.classList.add("error");
+  $("rTitle").textContent = title;
+  $("rChips").innerHTML = (chips || []).map(c => `<span class="chip">${c}</span>`).join("");
+  const ins = $("rInsight"); ins.classList.remove("show");
+  $("rNote").textContent = "";
+  if (typeof value === "number") {
+    countUp($("rValue"), value, layer === "ndvi" || layer.startsWith("sm_") && layer !== "sm_rootzone_pctl" ? 3 : 1);
+    const rule = (RULES[layer] || []).find(x => value < x[0]);
+    if (rule) {
+      $("rDot").className = "dot " + rule[2];
+      $("rInsightText").textContent = rule[1];
+      void ins.offsetWidth; ins.classList.add("show");
+    }
+    $("rNote").textContent = NOTES[layer] || "";
+  } else {
+    $("rValue").textContent = value;
+  }
+  r.classList.add("show");
+}
+function showCard(id) { const c = $(id); c.classList.remove("show"); void c.offsetWidth; c.classList.add("show"); }
+const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
 
+// ---------- main ----------
 async function run() {
-  const info = $("info");
-  info.textContent = "Loading... (this can take 10-90 seconds)";
-  if (chart2) { chart2.destroy(); chart2 = null; }
-
   const layer = $("layer").value;
-  const q = `lat=${$("lat").value}&lon=${$("lon").value}` +
-            `&start=${$("start").value}&end=${$("end").value}`;
+  if ($("start").value >= $("end").value) {
+    showResult(layer, "Check your dates", "End date must be after start date.", [], true);
+    return;
+  }
+  const q = `lat=${$("lat").value}&lon=${$("lon").value}&start=${$("start").value}&end=${$("end").value}`;
+
+  setBusy(true);
+  $("result").classList.remove("show");
+  $("cardWeather").classList.remove("show"); $("cardSoil").classList.remove("show");
+  if (chart2) { chart2.destroy(); chart2 = null; }
 
   try {
     // 1) Earth Engine map layer
-    const gRes = await fetch(`${API}/api/gee/map?${q}&layer=${layer}`);
-    const g = await gRes.json();
+    const g = await (await fetch(`${API}/api/gee/map?${q}&layer=${layer}`)).json();
     if (g.detail) throw new Error(g.detail);
 
     if (geeLayer) map.removeLayer(geeLayer);
-    geeLayer = L.tileLayer(g.tile_url, { opacity: 0.75 }).addTo(map);
-    map.setView([$("lat").value, $("lon").value], zoomFor(g.resolution_m));
-    if (marker) map.removeLayer(marker);
-    marker = L.marker([$("lat").value, $("lon").value]).addTo(map);
+    geeLayer = L.tileLayer(g.tile_url, { opacity: 0.8 }).addTo(map);
 
-    info.textContent = LABELS[g.layer] + ": " +
-                       (g.mean != null ? g.mean.toFixed(3) : "n/a") +
-                       " | Resolution: " + resText(g.resolution_m) +
-                       (g.scenes ? " | Images used: " + g.scenes : "") +
-                       (g.note ? " | " + g.note : "");
+    const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
+    map.flyToBounds(boundsFor(lat, lon, layer.startsWith("sm_") ? 60 : 10), { duration: 1.4, padding: [30, 30] });
+    setMarker(lat, lon);
+    showLegend(layer); showTag(layer);
+
+    const chips = ["Resolution: " + resText(g.resolution_m)];
+    if (g.scenes) chips.push("Images used: " + g.scenes);
+    showResult(layer, LABELS[g.layer], g.mean != null ? g.mean : "n/a", chips);
 
     // 2) NASA POWER chart
-    const pRes = await fetch(`${API}/api/power?${q}&params=T2M,PRECTOTCORR`);
-    const p = await pRes.json();
+    const p = await (await fetch(`${API}/api/power?${q}&params=T2M,PRECTOTCORR`)).json();
     if (p.detail) throw new Error(p.detail);
 
     const days = Object.keys(p.T2M);
+    const temps = days.map(d => p.T2M[d]), rains = days.map(d => p.PRECTOTCORR[d]);
+    const vt = temps.filter(v => v != null), vr = rains.filter(v => v != null);
+    $("kAvg").textContent = vt.length ? avg(vt).toFixed(1) + " °C" : "-";
+    $("kMax").textContent = vt.length ? Math.max(...vt).toFixed(1) + " °C" : "-";
+    $("kRain").textContent = vr.length ? vr.reduce((a, b) => a + b, 0).toFixed(0) + " mm" : "-";
+    $("kDays").textContent = vr.filter(v => v >= 1).length + " days";
+
     if (chart) chart.destroy();
+    showCard("cardWeather");
     chart = new Chart($("chart"), {
       data: {
-        labels: days.map(d => d.slice(6) + "/" + d.slice(4, 6)),
+        labels: days.map(fmtP),
         datasets: [
-          { type: "line", label: "Temperature (°C)", data: days.map(d => p.T2M[d]),
-            borderColor: "#d73027", yAxisID: "y" },
-          { type: "bar", label: "Rainfall (mm)", data: days.map(d => p.PRECTOTCORR[d]),
-            backgroundColor: "#74add1", yAxisID: "y1" }
+          { type: "line", label: "Temperature (°C)", data: temps, order: 0, yAxisID: "y",
+            borderColor: "#ef4444", borderWidth: 2.5, tension: .4, pointRadius: 0, pointHoverRadius: 5,
+            pointBackgroundColor: "#ef4444", fill: true,
+            backgroundColor: (c) => grad(c.chart, "rgba(239,68,68,.30)", "rgba(239,68,68,0)") },
+          { type: "bar", label: "Rainfall (mm)", data: rains, order: 1, yAxisID: "y1",
+            borderRadius: 6, maxBarThickness: 14,
+            backgroundColor: (c) => grad(c.chart, "rgba(96,165,250,.95)", "rgba(37,99,235,.45)") }
         ]
       },
       options: {
-        plugins: { title: { display: true, text: "Daily weather (NASA POWER)" } },
+        maintainAspectRatio: false,
+        animation: { duration: 1200, easing: "easeOutQuart" },
+        plugins: { tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y.toFixed(1)}` } } },
         scales: {
-          y:  { position: "left",  title: { display: true, text: "°C" } },
-          y1: { position: "right", title: { display: true, text: "mm" },
-                grid: { drawOnChartArea: false } }
+          x:  { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } },
+          y:  { position: "left", border: { display: false }, grid: { color: "#eef2f7" }, ticks: { callback: v => v + "°" },
+                title: { display: true, text: "Temperature" } },
+          y1: { position: "right", min: 0, suggestedMax: 10, border: { display: false }, grid: { drawOnChartArea: false },
+                title: { display: true, text: "Rain (mm)" } }
         }
       }
     });
 
-    // 3) Soil moisture time series (only for soil moisture layers)
+    // 3) Soil moisture time series (soil moisture layers only)
     if (layer.startsWith("sm_")) {
-      const sRes = await fetch(`${API}/api/smap/timeseries?${q}`);
-      const s = await sRes.json();
+      const s = await (await fetch(`${API}/api/smap/timeseries?${q}`)).json();
       if (s.detail) throw new Error(s.detail);
+
+      const vs = s.sm_surface.filter(v => v != null), vz = s.sm_rootzone.filter(v => v != null);
+      $("sAvgS").textContent = vs.length ? avg(vs).toFixed(3) : "-";
+      $("sAvgR").textContent = vz.length ? avg(vz).toFixed(3) : "-";
+      const tr = $("sTrend");
+      if (vz.length > 1) {
+        const d = vz[vz.length - 1] - vz[0];
+        tr.textContent = (d >= 0 ? "▲ +" : "▼ ") + d.toFixed(3);
+        tr.className = d >= 0 ? "up" : "down";
+      } else { tr.textContent = "-"; tr.className = ""; }
+
+      showCard("cardSoil");
       chart2 = new Chart($("chart2"), {
         type: "line",
         data: {
-          labels: s.dates.map(d => d.slice(8) + "/" + d.slice(5, 7)),
+          labels: s.dates.map(fmtI),
           datasets: [
-            { label: "Surface (0-5 cm)", data: s.sm_surface, borderColor: "#d95f0e", spanGaps: true },
-            { label: "Root zone (0-100 cm)", data: s.sm_rootzone, borderColor: "#2c7bb6", spanGaps: true }
+            { label: "Surface (0-5 cm)", data: s.sm_surface, borderColor: "#f59e0b", borderWidth: 2.5, tension: .4,
+              pointRadius: 0, pointHoverRadius: 5, spanGaps: true, fill: true,
+              backgroundColor: (c) => grad(c.chart, "rgba(245,158,11,.28)", "rgba(245,158,11,0)") },
+            { label: "Root zone (0-100 cm)", data: s.sm_rootzone, borderColor: "#2563eb", borderWidth: 2.5, tension: .4,
+              pointRadius: 0, pointHoverRadius: 5, spanGaps: true, fill: true,
+              backgroundColor: (c) => grad(c.chart, "rgba(37,99,235,.28)", "rgba(37,99,235,0)") }
           ]
         },
         options: {
-          plugins: { title: { display: true, text: "Daily soil moisture (SMAP L4)" } },
-          scales: { y: { title: { display: true, text: "m³/m³" } } }
+          maintainAspectRatio: false,
+          animation: { duration: 1200, easing: "easeOutQuart" },
+          plugins: { tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y != null ? c.parsed.y.toFixed(3) : "n/a"} m³/m³` } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } },
+            y: { border: { display: false }, grid: { color: "#eef2f7" }, title: { display: true, text: "m³/m³" } }
+          }
         }
       });
     }
   } catch (err) {
-    info.textContent = "Error: " + err.message;
+    showResult(layer, "Something went wrong", err.message, [], true);
     console.error(err);
+  } finally {
+    setBusy(false);
   }
 }
 </script>
