@@ -1,4 +1,5 @@
 import ee, requests
+from datetime import date
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,9 +9,20 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
+SMAP_ID = "NASA/SMAP/SPL4SMGP/008"
+
+# layer name -> (SMAP band, min, max)
+SMAP = {
+    "sm_surface":  ("sm_surface", 0.05, 0.50),
+    "sm_rootzone": ("sm_rootzone", 0.05, 0.50),
+    "sm_profile":  ("sm_profile", 0.05, 0.50),
+    "sm_rootzone_pctl": ("sm_rootzone_pctl", 0, 100),
+}
+SM_PALETTE = ["a50026", "fdae61", "ffffbf", "abd9e9", "2c7bb6"]   # dry -> wet
+
 
 def landsat(start, end, region):
-    """Landsat 8 + 9, badal/shadow hata ke, NDVI aur temperature ke liye ready."""
+    """Landsat 8 + 9, cloud/shadow masked, ready for NDVI and temperature."""
     def prep(img):
         qa = img.select("QA_PIXEL")
         clear = (qa.bitwiseAnd(1 << 1).eq(0)
@@ -29,14 +41,14 @@ def landsat(start, end, region):
 @app.get("/api/gee/map")
 def gee_map(layer: str, start: str, end: str, lat: float, lon: float, radius_km: float = 10):
     try:
-        region = ee.Geometry.Point([lon, lat]).buffer(radius_km * 1000).bounds()
         scenes = None
 
         if layer in ("ndvi", "lst"):
+            region = ee.Geometry.Point([lon, lat]).buffer(radius_km * 1000).bounds()
             col = landsat(start, end, region)
             scenes = col.size().getInfo()
             if scenes == 0:
-                raise HTTPException(404, "Is date range me saaf Landsat image nahi mili. Date range badhao.")
+                raise HTTPException(404, "No clear Landsat images found for this date range. Try a longer range.")
             comp = col.median()
             scale = 30
             if layer == "ndvi":
@@ -49,11 +61,24 @@ def gee_map(layer: str, start: str, end: str, lat: float, lon: float, radius_km:
                        "palette": ["313695", "ffffbf", "a50026"]}
 
         elif layer == "rain":
+            region = ee.Geometry.Point([lon, lat]).buffer(radius_km * 1000).bounds()
             col = (ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
                    .filterDate(start, end).select("precipitation"))
             img = col.sum().rename("v")
             vis = {"min": 0, "max": 200, "palette": ["ffffff", "74add1", "08306b"]}
             scale = 5566
+
+        elif layer in SMAP:
+            band, vmin, vmax = SMAP[layer]
+            region = ee.Geometry.Point([lon, lat]).buffer(60 * 1000).bounds()   # coarse data, bigger area
+            col = ee.ImageCollection(SMAP_ID).filterDate(start, end).select(band)
+            scenes = col.size().getInfo()
+            if scenes == 0:
+                raise HTTPException(404, "No SMAP soil moisture data for this date range. "
+                                         "SMAP L4 can lag by a few days, so try an earlier end date.")
+            img = col.mean().rename("v")
+            vis = {"min": vmin, "max": vmax, "palette": SM_PALETTE}
+            scale = 9000
         else:
             raise HTTPException(404, "Unknown layer")
 
@@ -64,6 +89,43 @@ def gee_map(layer: str, start: str, end: str, lat: float, lon: float, radius_km:
         return {"tile_url": m["tile_fetcher"].url_format, "mean": stats.get("v"),
                 "layer": layer, "scenes": scenes, "resolution_m": scale}
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/smap/timeseries")
+def smap_timeseries(lat: float, lon: float, start: str, end: str):
+    """Daily mean surface + root-zone soil moisture at a point (SMAP L4)."""
+    try:
+        d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+        n_days = (d1 - d0).days
+        if n_days < 1:
+            raise HTTPException(400, "End date must be after start date.")
+        if n_days > 180:
+            raise HTTPException(400, "Soil moisture chart supports up to 180 days. Shorten the range.")
+
+        pt = ee.Geometry.Point([lon, lat])
+        col = (ee.ImageCollection(SMAP_ID).filterDate(start, end)
+               .select(["sm_surface", "sm_rootzone"]))
+
+        def daily(i):
+            day0 = ee.Date(start).advance(ee.Number(i), "day")
+            sub = col.filterDate(day0, day0.advance(1, "day"))
+            vals = ee.Dictionary(ee.Algorithms.If(
+                sub.size().gt(0),
+                sub.mean().reduceRegion(ee.Reducer.first(), pt, 9000),
+                ee.Dictionary({"sm_surface": None, "sm_rootzone": None})))
+            return ee.Feature(None, vals).set("date", day0.format("YYYY-MM-dd"))
+
+        fc = ee.FeatureCollection(ee.List.sequence(0, n_days - 1).map(daily))
+        rows = fc.getInfo()["features"]
+        return {
+            "dates": [r["properties"]["date"] for r in rows],
+            "sm_surface": [r["properties"].get("sm_surface") for r in rows],
+            "sm_rootzone": [r["properties"].get("sm_rootzone") for r in rows],
+        }
     except HTTPException:
         raise
     except Exception as e:
