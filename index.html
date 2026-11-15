@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Field Shift Viewer</title>
@@ -14,27 +14,28 @@
   input, select, button { width: 100%; margin: 4px 0 10px; padding: 8px; box-sizing: border-box; }
   button { background: #1a9850; color: white; border: none; font-size: 15px; cursor: pointer; }
   #info { margin: 10px 0; font-weight: bold; }
+  .hint { font-size: 13px; color: #444; }
 </style>
 </head>
 <body>
 
 <div id="side">
   <h3>Field Shift Viewer</h3>
-  <p style="font-size:13px">Map par click karo, ya latitude/longitude likho.</p>
+  <p class="hint">Click on the map to pick a location, or type the latitude and longitude.</p>
 
   <label>Latitude</label>
   <input id="lat" value="19.09">
   <label>Longitude</label>
   <input id="lon" value="74.74">
   <label>Start date</label>
-  <input id="start" type="date" value="2026-08-01">
+  <input id="start" type="date" value="2026-09-01">
   <label>End date</label>
-  <input id="end" type="date" value="2026-10-31">
-  <label>Kya dekhna hai?</label>
+  <input id="end" type="date" value="2026-11-01">
+  <label>What do you want to see?</label>
   <select id="layer">
-    <option value="ndvi">NDVI (fasal ki sehat)</option>
-    <option value="lst">Land Surface Temp (°C)</option>
-    <option value="rain">Baarish (mm)</option>
+    <option value="ndvi">NDVI (crop health) - 30 m</option>
+    <option value="lst">Surface temperature (°C) - 30 m</option>
+    <option value="rain">Rainfall (mm) - 5 km</option>
   </select>
 
   <button onclick="run()">Show data</button>
@@ -47,10 +48,17 @@
 <script>
 const API = "http://127.0.0.1:8000";
 
+const LABELS = {
+  ndvi: "Mean NDVI",
+  lst:  "Mean surface temperature (°C)",
+  rain: "Total rainfall (mm)"
+};
+
 const map = L.map("map").setView([19.09, 74.74], 9);
+
+// Satellite basemap + place names on top
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
             { attribution: "Tiles © Esri", maxZoom: 18 }).addTo(map);
-
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
             { maxZoom: 18, zIndex: 5 }).addTo(map);
 
@@ -64,9 +72,13 @@ map.on("click", (e) => {
   marker = L.marker(e.latlng).addTo(map);
 });
 
+function resText(m) {
+  return m >= 1000 ? "~" + Math.round(m / 1000) + " km" : m + " m";
+}
+
 async function run() {
   const info = $("info");
-  info.textContent = "Loading... (5-15 second lag sakte hain)";
+  info.textContent = "Loading... (this can take 10-60 seconds)";
 
   const q = `lat=${$("lat").value}&lon=${$("lon").value}` +
             `&start=${$("start").value}&end=${$("end").value}`;
@@ -79,11 +91,14 @@ async function run() {
 
     if (geeLayer) map.removeLayer(geeLayer);
     geeLayer = L.tileLayer(g.tile_url, { opacity: 0.75 }).addTo(map);
-    map.setView([$("lat").value, $("lon").value], 10);
+    map.setView([$("lat").value, $("lon").value], 13);
     if (marker) map.removeLayer(marker);
     marker = L.marker([$("lat").value, $("lon").value]).addTo(map);
 
-    info.textContent = "Average: " + (g.mean != null ? g.mean.toFixed(2) : "n/a");
+    info.textContent = LABELS[g.layer] + ": " +
+                       (g.mean != null ? g.mean.toFixed(2) : "n/a") +
+                       " | Resolution: " + resText(g.resolution_m) +
+                       (g.scenes ? " | Scenes used: " + g.scenes : "");
 
     // 2) NASA POWER chart
     const pRes = await fetch(`${API}/api/power?${q}&params=T2M,PRECTOTCORR`);
@@ -96,13 +111,14 @@ async function run() {
       data: {
         labels: days.map(d => d.slice(6) + "/" + d.slice(4, 6)),
         datasets: [
-          { type: "line", label: "Temp (°C)", data: days.map(d => p.T2M[d]),
+          { type: "line", label: "Temperature (°C)", data: days.map(d => p.T2M[d]),
             borderColor: "#d73027", yAxisID: "y" },
-          { type: "bar", label: "Rain (mm)", data: days.map(d => p.PRECTOTCORR[d]),
+          { type: "bar", label: "Rainfall (mm)", data: days.map(d => p.PRECTOTCORR[d]),
             backgroundColor: "#74add1", yAxisID: "y1" }
         ]
       },
       options: {
+        plugins: { title: { display: true, text: "Daily weather (NASA POWER)" } },
         scales: {
           y:  { position: "left",  title: { display: true, text: "°C" } },
           y1: { position: "right", title: { display: true, text: "mm" },
@@ -110,8 +126,8 @@ async function run() {
         }
       }
     });
-    } catch (err) {
-    info.textContent = "Error: " + err.message + " | API: " + API;
+  } catch (err) {
+    info.textContent = "Error: " + err.message;
     console.error(err);
   }
 }
