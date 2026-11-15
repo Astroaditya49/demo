@@ -110,8 +110,9 @@ async function run() {
         }
       }
     });
-  } catch (err) {
-    info.textContent = "Error: " + err.message;
+    } catch (err) {
+    info.textContent = "Error: " + err.message + " | API: " + API;
+    console.error(err);
   }
 }
 </script>
