@@ -38,6 +38,11 @@
       <option value="ndvi">NDVI (crop health) - 30 m</option>
       <option value="lst">Surface temperature (°C) - 30 m</option>
     </optgroup>
+    <optgroup label="Highest resolution - Sentinel-2 (10 m)">
+      <option value="ndvi10">NDVI crop health - 10 m</option>
+      <option value="ndmi">Vegetation water content (NDMI) - 10 m</option>
+      <option value="productivity">Land productivity change vs past years - 10 m</option>
+    </optgroup>
     <optgroup label="Soil moisture (SMAP L4, ~9 km)">
       <option value="sm_surface">Surface soil moisture (0-5 cm)</option>
       <option value="sm_rootzone">Root-zone soil moisture (0-100 cm)</option>
@@ -46,6 +51,20 @@
     </optgroup>
     <optgroup label="Rainfall">
       <option value="rain">Rainfall (mm) - 5 km</option>
+      <option value="rain_reliability">Rainfall reliability (%) - 5 km</option>
+      <option value="storm_freq">Extreme-storm frequency (days) - 5 km</option>
+    </optgroup>
+    <optgroup label="Soil risk and water (30 m)">
+      <option value="erosion">Erosion risk (relative index) - 30 m</option>
+      <option value="water_input">Water input to soil (mm) - 30 m</option>
+    </optgroup>
+    <optgroup label="Radiation and water availability">
+      <option value="radiation">Solar radiation (MJ/m²/day) - 30 m</option>
+      <option value="water_stress">Water availability ET/PET - 500 m</option>
+    </optgroup>
+    <optgroup label="Soil nutrients and productivity">
+      <option value="soil_n">Soil nitrogen (%) 0-30 cm - 250 m</option>
+      <option value="gpp">Land productivity GPP (g C/m²) - 500 m</option>
     </optgroup>
   </select>
 
@@ -67,7 +86,18 @@ const LABELS = {
   sm_surface:  "Mean surface soil moisture (m³/m³)",
   sm_rootzone: "Mean root-zone soil moisture (m³/m³)",
   sm_profile:  "Mean profile soil moisture (m³/m³)",
-  sm_rootzone_pctl: "Mean root-zone moisture percentile (%)"
+  sm_rootzone_pctl: "Mean root-zone moisture percentile (%)",
+  rain_reliability: "Mean rainfall reliability (%)",
+  storm_freq: "Mean extreme-storm days",
+  erosion: "Mean erosion risk index",
+  water_input: "Mean water input to soil (mm)",
+  ndvi10: "Mean NDVI (10 m)",
+  ndmi: "Mean NDMI (vegetation water content)",
+  productivity: "Mean productivity change (%)",
+  radiation: "Mean solar radiation (MJ/m²/day)",
+  water_stress: "Mean ET/PET (water availability, 0-1)",
+  soil_n: "Mean soil nitrogen 0-30 cm (%)",
+  gpp: "Mean GPP (g C/m²)"
 };
 
 const map = L.map("map").setView([19.09, 74.74], 9);
@@ -92,9 +122,16 @@ function resText(m) {
   return m >= 1000 ? "~" + Math.round(m / 1000) + " km" : m + " m";
 }
 
+// fine layers: zoom in close, coarse layers: wider view
+function zoomFor(m) {
+  if (m >= 1000) return 9;
+  if (m >= 250) return 11;
+  return 13;
+}
+
 async function run() {
   const info = $("info");
-  info.textContent = "Loading... (this can take 10-60 seconds)";
+  info.textContent = "Loading... (this can take 10-90 seconds)";
   if (chart2) { chart2.destroy(); chart2 = null; }
 
   const layer = $("layer").value;
@@ -109,15 +146,15 @@ async function run() {
 
     if (geeLayer) map.removeLayer(geeLayer);
     geeLayer = L.tileLayer(g.tile_url, { opacity: 0.75 }).addTo(map);
-    // fine layers: zoom in close, coarse layers (rain, soil moisture): wider view
-    map.setView([$("lat").value, $("lon").value], g.resolution_m >= 1000 ? 9 : 13);
+    map.setView([$("lat").value, $("lon").value], zoomFor(g.resolution_m));
     if (marker) map.removeLayer(marker);
     marker = L.marker([$("lat").value, $("lon").value]).addTo(map);
 
     info.textContent = LABELS[g.layer] + ": " +
                        (g.mean != null ? g.mean.toFixed(3) : "n/a") +
                        " | Resolution: " + resText(g.resolution_m) +
-                       (g.scenes ? " | Images used: " + g.scenes : "");
+                       (g.scenes ? " | Images used: " + g.scenes : "") +
+                       (g.note ? " | " + g.note : "");
 
     // 2) NASA POWER chart
     const pRes = await fetch(`${API}/api/power?${q}&params=T2M,PRECTOTCORR`);
