@@ -8,31 +8,67 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
-LAYERS = {
-    "ndvi": {"id": "MODIS/061/MOD13A2", "band": "NDVI", "scale": 0.0001, "offset": 0,
-             "vis": {"min": 0, "max": 0.9, "palette": ["d73027", "fee08b", "1a9850"]}},
-    "lst":  {"id": "MODIS/061/MOD11A2", "band": "LST_Day_1km", "scale": 0.02, "offset": -273.15,
-             "vis": {"min": 15, "max": 45, "palette": ["313695", "ffffbf", "a50026"]}},
-    "rain": {"id": "UCSB-CHG/CHIRPS/DAILY", "band": "precipitation", "sum": True,
-             "vis": {"min": 0, "max": 200, "palette": ["ffffff", "74add1", "08306b"]}},
-}
+
+def landsat(start, end, region):
+    """Landsat 8 + 9, badal/shadow hata ke, NDVI aur temperature ke liye ready."""
+    def prep(img):
+        qa = img.select("QA_PIXEL")
+        clear = (qa.bitwiseAnd(1 << 1).eq(0)
+                 .And(qa.bitwiseAnd(1 << 2).eq(0))
+                 .And(qa.bitwiseAnd(1 << 3).eq(0))
+                 .And(qa.bitwiseAnd(1 << 4).eq(0)))
+        sr = img.select(["SR_B4", "SR_B5"]).multiply(0.0000275).add(-0.2)
+        st = img.select("ST_B10").multiply(0.00341802).add(149.0).subtract(273.15)
+        return sr.addBands(st).updateMask(clear)
+
+    c8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+    c9 = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
+    return c8.merge(c9).filterBounds(region).filterDate(start, end).map(prep)
+
 
 @app.get("/api/gee/map")
-def gee_map(layer: str, start: str, end: str, lat: float, lon: float, radius_km: float = 25):
-    cfg = LAYERS.get(layer)
-    if not cfg:
-        raise HTTPException(404, "Unknown layer")
+def gee_map(layer: str, start: str, end: str, lat: float, lon: float, radius_km: float = 10):
     try:
         region = ee.Geometry.Point([lon, lat]).buffer(radius_km * 1000).bounds()
-        col = ee.ImageCollection(cfg["id"]).filterDate(start, end).select(cfg["band"])
-        img = col.sum() if cfg.get("sum") else col.mean()
-        img = img.multiply(cfg.get("scale", 1)).add(cfg.get("offset", 0)).clip(region)
-        m = img.getMapId(cfg["vis"])
-        stats = img.reduceRegion(ee.Reducer.mean(), region, 1000, bestEffort=True).getInfo()
-        return {"tile_url": m["tile_fetcher"].url_format,
-                "mean": stats.get(cfg["band"]), "layer": layer}
+        scenes = None
+
+        if layer in ("ndvi", "lst"):
+            col = landsat(start, end, region)
+            scenes = col.size().getInfo()
+            if scenes == 0:
+                raise HTTPException(404, "Is date range me saaf Landsat image nahi mili. Date range badhao.")
+            comp = col.median()
+            scale = 30
+            if layer == "ndvi":
+                img = comp.normalizedDifference(["SR_B5", "SR_B4"]).rename("v")
+                vis = {"min": 0, "max": 0.8,
+                       "palette": ["d73027", "fee08b", "a6d96a", "1a9850"]}
+            else:
+                img = comp.select("ST_B10").rename("v")
+                vis = {"min": 15, "max": 45,
+                       "palette": ["313695", "ffffbf", "a50026"]}
+
+        elif layer == "rain":
+            col = (ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                   .filterDate(start, end).select("precipitation"))
+            img = col.sum().rename("v")
+            vis = {"min": 0, "max": 200, "palette": ["ffffff", "74add1", "08306b"]}
+            scale = 5566
+        else:
+            raise HTTPException(404, "Unknown layer")
+
+        img = img.clip(region)
+        m = img.getMapId(vis)
+        stats = img.reduceRegion(ee.Reducer.mean(), region, scale,
+                                 bestEffort=True, maxPixels=1e9).getInfo()
+        return {"tile_url": m["tile_fetcher"].url_format, "mean": stats.get("v"),
+                "layer": layer, "scenes": scenes, "resolution_m": scale}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
 
 @app.get("/api/power")
 def power(lat: float, lon: float, start: str, end: str, params: str = "T2M,PRECTOTCORR"):
